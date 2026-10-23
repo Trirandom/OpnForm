@@ -307,7 +307,7 @@ const parsedFiles = computed(() => {
 })
 
 const isImage = (fileName) => {
-  return ["png", "gif", "jpg", "jpeg", "tif"].includes(
+  return ["png", "gif", "jpg", "jpeg", "tif", "webp"].includes(
     getFileExtension(fileName),
   )
 }
