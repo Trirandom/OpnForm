@@ -409,9 +409,17 @@ class StoreFormSubmissionJob implements ShouldQueue
             }
 
             $path = FormController::ASSETS_UPLOAD_PATH . '/' . $fileName; // Assuming assets are in a defined path
-            $newPath = FileUploadPathService::getFileUploadPath($this->form->id, $fileName);
-            Storage::move($path, $newPath);
-            return $fileName;
+            if (!Storage::exists($path)) {
+                return null;
+            }
+            // The asset stays in place for the next submissions: each submission gets its own copy,
+            // so deleting a submission doesn't delete the file of the others
+            $parser = StorageFileNameParser::parse($fileName);
+            $baseName = $parser->uuid ? $parser->fileName : pathinfo($fileName, PATHINFO_FILENAME);
+            $extension = $parser->uuid ? $parser->extension : pathinfo($fileName, PATHINFO_EXTENSION);
+            $copyName = ($baseName ? $baseName . '_' : '') . Str::uuid() . ($extension ? '.' . $extension : '');
+            Storage::copy($path, FileUploadPathService::getFileUploadPath($this->form->id, $copyName));
+            return $copyName;
         }
 
         $shouldSkip = $this->isSkipForUpload($value);
