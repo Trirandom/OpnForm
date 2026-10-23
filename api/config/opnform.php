@@ -7,6 +7,13 @@ return [
     'extra_pro_users_emails' => explode(',', env('EXTRA_PRO_USERS_EMAILS') ?? ''),
     'show_official_templates' => env('SHOW_OFFICIAL_TEMPLATES', true),
     'condition_mapping' => json_decode(file_get_contents(resource_path('data/open_filters.json')), true),
+    'image_optimization' => [
+        'enabled' => env('IMAGE_OPTIMIZATION_ENABLED', true),
+        'max_width' => (int) env('IMAGE_MAX_WIDTH', 720),
+        // Form assets (logos, covers, images in descriptions) are displayed bigger than submission images
+        'assets_max_width' => (int) env('IMAGE_ASSETS_MAX_WIDTH', 1920),
+        'quality' => (int) env('IMAGE_QUALITY', 80),
+    ],
     'custom_code' => [
         'enable_self_hosted' => env('CUSTOM_CODE_ENABLE_SELF_HOSTED', false),
     ],
