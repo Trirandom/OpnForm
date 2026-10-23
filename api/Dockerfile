@@ -1,0 +1,108 @@
+# Build stage - using PHP CLI image with extensions
+FROM php:8.5-cli AS builder
+
+# Install composer and extensions needed for dependency installation
+RUN apt-get update && apt-get install -y \
+    libzip-dev \
+    libpng-dev \
+    unzip \
+    git \
+    && docker-php-ext-install -j$(nproc) \
+    bcmath \
+    gd \
+    zip \
+    && curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+
+WORKDIR /app
+
+# Copy the entire source code for proper installation
+COPY . .
+
+# Install dependencies including dev dependencies
+RUN composer install --optimize-autoloader --no-interaction \
+    --ignore-platform-req=php \
+    --ignore-platform-req=ext-bcmath \
+    --ignore-platform-req=ext-gd
+
+# Final stage - smaller runtime image
+FROM php:8.5-fpm-alpine
+
+# Accept version build argument
+ARG APP_VERSION=unknown
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    libzip \
+    libpng \
+    libjpeg-turbo \
+    libwebp \
+    postgresql-client \
+    libpq \
+    procps \
+    unzip \
+    bash \
+    icu-libs \
+    && rm -rf /var/cache/apk/*
+
+# Install build dependencies and PHP extensions
+RUN apk add --no-cache --virtual .build-deps \
+    $PHPIZE_DEPS \
+    libzip-dev \
+    libpng-dev \
+    libjpeg-turbo-dev \
+    libwebp-dev \
+    postgresql-dev \
+    oniguruma-dev \
+    icu-dev \
+    && docker-php-ext-configure pgsql \
+    && docker-php-ext-configure gd --with-jpeg --with-webp \
+    && docker-php-ext-install -j$(nproc) \
+    pdo \
+    zip \
+    gd \
+    exif \
+    pgsql \
+    pdo_pgsql \
+    bcmath \
+    && pecl install redis \
+    && docker-php-ext-enable redis \
+    && apk del .build-deps
+
+WORKDIR /usr/share/nginx/html/
+
+# Create storage directories
+RUN mkdir -p storage/framework/sessions \
+    storage/framework/views \
+    storage/framework/cache \
+    storage/logs \
+    storage/app/public \
+    bootstrap/cache \
+    && chown -R www-data:www-data storage bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache
+
+# Copy the entire application from the builder stage. Owned by root and read-only to the
+# runtime user, except the two directories Laravel writes to.
+COPY --from=builder /app/ ./
+RUN chown -R www-data:www-data storage bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache \
+    && chmod a+x ./artisan \
+    && rm -f public/storage \
+    && ln -s /usr/share/nginx/html/storage/app/public public/storage
+
+# Set version as environment variable
+ENV APP_VERSION_DOCKER=$APP_VERSION
+
+# Setup entrypoint
+COPY php-fpm-entrypoint /usr/local/bin/opnform-entrypoint
+RUN chmod a+x /usr/local/bin/*
+
+# The entrypoint writes PHP settings from env vars here at startup, so it must be writable by
+# the unprivileged user rather than root-only like the rest of conf.d.
+RUN touch /usr/local/etc/php/conf.d/99-custom.ini \
+    && chown www-data:www-data /usr/local/etc/php/conf.d/99-custom.ini
+
+# php-fpm, queue:work and schedule:work all run as www-data (uid 82) instead of root.
+USER www-data
+
+ENTRYPOINT ["/usr/local/bin/opnform-entrypoint"]
+CMD ["php-fpm"]

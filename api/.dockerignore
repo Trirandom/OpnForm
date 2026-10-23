@@ -1,0 +1,12 @@
+# Secrets come from the k8s Secret / compose env_file at runtime, never baked into the image.
+.env
+.env.*
+!.env.example
+.git
+vendor
+node_modules
+storage/app/*
+storage/framework/*
+storage/logs/*
+bootstrap/cache/*.php
+*.log

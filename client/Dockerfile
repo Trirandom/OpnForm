@@ -1,0 +1,50 @@
+FROM node:24-alpine AS javascript-builder
+WORKDIR /app
+
+# It's best to add as few files as possible before running the build commands
+# as they will be re-run everytime one of those files changes.
+#
+# It's possible to run npm install with only the package.json and package-lock.json file.
+
+ADD package.json package-lock.json ./
+
+# Install git and other necessary build tools
+RUN apk add --no-cache git
+
+# Clear npm cache, remove existing node_modules, and install dependencies
+RUN npm cache clean --force && \
+    rm -rf node_modules && \
+    npm ci
+
+# Clean up after npm install to free memory
+RUN npm cache clean --force
+
+# Explicitly install the correct version of esbuild
+# RUN npm install esbuild@0.21.5
+
+ADD ./ /app/
+
+ENV NODE_OPTIONS="--max-old-space-size=6144"
+# Set production mode to reduce memory usage
+ENV NODE_ENV=production
+# Disable source maps to reduce memory usage
+ENV GENERATE_SOURCEMAP=false
+# Additional memory optimizations
+ENV NUXT_TELEMETRY_DISABLED=1
+# Optimize Vite build for memory
+ENV VITE_NODE_OPTIONS="--max-old-space-size=10240"
+# Run the build with additional memory optimizations and limited concurrency
+RUN --mount=type=tmpfs,target=/tmp \
+    NODE_OPTIONS="--max-old-space-size=10240" \
+    NUXT_BUILD_CONCURRENCY=1 \
+    npm run build
+
+FROM node:24-alpine
+WORKDIR /app
+COPY --from=javascript-builder /app/.output/ /app/
+RUN ls /app/
+
+# Run the Nuxt server as the image's built-in unprivileged user (uid 1000) instead of root
+USER node
+
+CMD [ "node", "./server/index.mjs" ]

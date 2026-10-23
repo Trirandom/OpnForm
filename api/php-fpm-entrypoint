@@ -1,0 +1,138 @@
+#!/bin/bash
+
+main() {
+    local COMMAND_AS_STRING="$*"
+    local ROLE="api" # Default role
+
+    case "$COMMAND_AS_STRING" in
+        *"artisan queue:work"*)
+            ROLE="worker"
+            ;;
+        *"artisan schedule:work"*)
+            ROLE="scheduler"
+            ;;
+        *)
+            # Defaults to "api" for any other command (e.g., php-fpm)
+            ROLE="api"
+            ;;
+    esac
+
+    echo "Determined role: $ROLE for command: $COMMAND_AS_STRING"
+
+    apply_php_configuration
+    prep_file_permissions 
+    prep_storage          
+    wait_for_db           
+
+    if [ "$ROLE" = "api" ]; then
+        echo "Running setup for API role..."
+        apply_db_migrations
+        optimize_application
+        echo "Starting server for API role with command: $@"
+        exec "$@"
+    elif [ "$ROLE" = "scheduler" ]; then
+        echo "Running setup for Scheduler role..."
+        echo "Initializing scheduler status for first run (entrypoint)"
+        php ./artisan app:scheduler-status --mode=record
+        echo "Starting scheduler with command: $@"
+        exec "$@"
+    elif [ "$ROLE" = "worker" ]; then
+        echo "Running setup for Worker role..."
+        echo "Starting worker with command: $@"
+        exec "$@"
+    else
+        # This case should ideally not be reached if ROLE defaults to "api"
+        echo "Error: Unknown role '$ROLE' determined from command '$COMMAND_AS_STRING'. Exiting."
+        exit 1
+    fi
+}
+
+apply_php_configuration() {
+    echo "Applying PHP configuration from environment variables"
+    
+    # Create custom PHP config file
+    PHP_CUSTOM_CONFIG_FILE="/usr/local/etc/php/conf.d/99-custom.ini"
+    # Start from an empty file so restarts don't keep appending duplicate settings
+    : > $PHP_CUSTOM_CONFIG_FILE
+    
+    # Apply memory limit if provided, otherwise default to 1G
+    if [ -n "$PHP_MEMORY_LIMIT" ]; then
+        echo "memory_limit = $PHP_MEMORY_LIMIT" >> $PHP_CUSTOM_CONFIG_FILE
+    else
+        echo "memory_limit = 1G" >> $PHP_CUSTOM_CONFIG_FILE
+    fi
+    
+    # Apply max execution time if provided, otherwise default to 300s
+    if [ -n "$PHP_MAX_EXECUTION_TIME" ]; then
+        echo "max_execution_time = $PHP_MAX_EXECUTION_TIME" >> $PHP_CUSTOM_CONFIG_FILE
+    else
+        echo "max_execution_time = 300" >> $PHP_CUSTOM_CONFIG_FILE
+    fi
+    
+    # Apply upload max filesize if provided, otherwise default to 50M
+    if [ -n "$PHP_UPLOAD_MAX_FILESIZE" ]; then
+        echo "upload_max_filesize = $PHP_UPLOAD_MAX_FILESIZE" >> $PHP_CUSTOM_CONFIG_FILE
+    else
+        echo "upload_max_filesize = 50M" >> $PHP_CUSTOM_CONFIG_FILE
+    fi
+    
+    # Apply post max size if provided, otherwise default to 55M
+    if [ -n "$PHP_POST_MAX_SIZE" ]; then
+        echo "post_max_size = $PHP_POST_MAX_SIZE" >> $PHP_CUSTOM_CONFIG_FILE
+    else
+        echo "post_max_size = 55M" >> $PHP_CUSTOM_CONFIG_FILE
+    fi
+    
+    # Log applied configuration
+    echo "Applied PHP configuration:"
+    cat $PHP_CUSTOM_CONFIG_FILE
+}
+
+prep_file_permissions() {
+    # Already done at build time; only needed when the source is bind-mounted (dev)
+    [ -x ./artisan ] || chmod a+x ./artisan
+}
+
+prep_storage() {
+    local app_storage_path="/usr/share/nginx/html/storage"
+
+    # Create Laravel-specific directories directly in the mounted volume
+    mkdir -p "$app_storage_path/app/public"
+    mkdir -p "$app_storage_path/framework/cache/data"
+    mkdir -p "$app_storage_path/framework/sessions"
+    mkdir -p "$app_storage_path/framework/views"
+    mkdir -p "$app_storage_path/logs"
+
+    # Set permissions for the entire storage directory. The image runs as www-data, so the chown
+    # only happens if the container is started as root (e.g. an old compose override).
+    if [ "$(id -u)" = "0" ]; then
+        chown -R www-data:www-data "$app_storage_path"
+    fi
+    chmod -R 775 "$app_storage_path" 2>/dev/null || echo "Warning: could not chmod some files in $app_storage_path"
+
+    # Run Laravel's storage link command (ensure script is run from app root or adjust path to artisan)
+    echo "Creating public storage symlink"
+    php ./artisan storage:link
+}
+
+wait_for_db() {
+    echo "Waiting for DB to be ready"
+    until php ./artisan migrate:status 2>&1 | grep -q -E "(Migration table not found|Migration name)"; do
+        sleep 1
+    done
+}
+
+apply_db_migrations() {
+    echo "Running DB Migrations"
+    php ./artisan migrate --force
+}
+
+optimize_application() {
+    echo "Clearing application cache"
+    php ./artisan optimize:clear
+
+    echo "Optimizing application"
+    php ./artisan optimize
+}
+
+main "$@"
