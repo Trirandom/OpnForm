@@ -37,6 +37,14 @@ class ImageOptimizer
      */
     public static function optimize(string $binary, ?string $fileName = null, ?int $maxWidth = null): ?string
     {
+        // Running out of memory is a fatal error the catch below can't recover from
+        if (!self::fitsInMemory($binary)) {
+            Log::warning('Image too big to optimize with the available memory, keeping original file', [
+                'file' => $fileName,
+            ]);
+            return null;
+        }
+
         try {
             $image = ImageManager::gd(autoOrientation: true)->read($binary);
             $image->scaleDown(width: $maxWidth ?? (int) config('opnform.image_optimization.max_width', 720));
@@ -56,6 +64,27 @@ class ImageOptimizer
         }
 
         return $encoded;
+    }
+
+    /**
+     * GD keeps the decoded bitmap in memory, plus a copy when auto-orienting: a 12MP phone
+     * photo peaks around 230MB, about 20 bytes per pixel.
+     */
+    private const BYTES_PER_PIXEL = 20;
+
+    private static function fitsInMemory(string $binary): bool
+    {
+        $limit = ini_parse_quantity((string) ini_get('memory_limit'));
+        if ($limit <= 0) {
+            return true;
+        }
+
+        $size = @getimagesizefromstring($binary);
+        if ($size === false) {
+            return true; // Not decodable anyway, GD will throw and we keep the original
+        }
+
+        return $size[0] * $size[1] * self::BYTES_PER_PIXEL < $limit - memory_get_usage();
     }
 
     public static function webpName(string $fileName): string

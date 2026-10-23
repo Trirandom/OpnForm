@@ -51,6 +51,24 @@ it('processes synchronously with auto increment field in redirect URL', function
     expect($processor->shouldProcessSynchronously($form))->toBeTrue();
 });
 
+it('processes synchronously with a file upload field', function () {
+    $user = $this->actingAsUser();
+    $workspace = $this->createUserWorkspace($user);
+    $form = $this->createForm($user, $workspace, [
+        'redirect_url' => null,
+        'properties' => [
+            [
+                'id' => 'field_1',
+                'type' => 'files',
+                'name' => 'Picture'
+            ]
+        ]
+    ]);
+
+    $processor = new FormSubmissionProcessor();
+    expect($processor->shouldProcessSynchronously($form))->toBeTrue();
+});
+
 it('processes asynchronously with no generated fields in redirect URL', function () {
     $user = $this->actingAsUser();
     $workspace = $this->createUserWorkspace($user);

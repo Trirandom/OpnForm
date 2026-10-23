@@ -23,6 +23,12 @@ class FormSubmissionProcessor
             return true;
         }
 
+        // Uploaded files are moved and optimized while storing the submission: process
+        // synchronously so a failure reaches the respondent instead of silently dropping the file
+        if (collect($form->properties)->contains(fn ($field) => ($field['type'] ?? null) === 'files')) {
+            return true;
+        }
+
         // If no redirect URL, no need to process synchronously
         if (!$form->redirect_url) {
             return false;

@@ -150,3 +150,24 @@ it('gives each submission its own copy of a prefilled form asset', function () {
     expect(Storage::exists('forms/' . $form->id . '/submissions/' . $firstName))->toBeFalse();
     expect(Storage::get('forms/' . $form->id . '/submissions/' . $secondName))->toBe('%PDF-1.4 default file');
 });
+
+it('keeps the original image when decoding it would exhaust the memory limit', function () {
+    Storage::fake();
+    $user = $this->actingAsUser();
+    $form = $this->createForm($user, $this->createUserWorkspace($user));
+
+    $content = fakeImage('jpeg', 4032, 3024);
+    $memoryLimit = ini_get('memory_limit');
+    ini_set('memory_limit', (string) (memory_get_usage() + 64 * 1024 * 1024));
+    try {
+        $uuid = putTmpFile($content);
+        $submission = submitFile($this, $form, 'IMG_' . $uuid . '.jpg');
+    } finally {
+        ini_set('memory_limit', $memoryLimit);
+    }
+
+    $fileFieldId = collect($form->properties)->where('type', 'files')->first()['id'];
+    $storedName = $submission->data[$fileFieldId][0];
+    expect($storedName)->toBe('IMG_' . $uuid . '.jpg');
+    expect(Storage::get('forms/' . $form->id . '/submissions/' . $storedName))->toBe($content);
+});
