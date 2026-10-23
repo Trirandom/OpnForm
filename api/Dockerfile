@@ -92,7 +92,8 @@ RUN chown -R www-data:www-data storage bootstrap/cache \
 # Set version as environment variable
 ENV APP_VERSION_DOCKER=$APP_VERSION
 
-# Setup entrypoint
+# Setup entrypoint and php configuration
+COPY php/conf.d/ /usr/local/etc/php/conf.d/
 COPY php-fpm-entrypoint /usr/local/bin/opnform-entrypoint
 RUN chmod a+x /usr/local/bin/*
 

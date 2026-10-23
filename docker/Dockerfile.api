@@ -34,6 +34,8 @@ ARG APP_VERSION=unknown
 RUN apk add --no-cache \
     libzip \
     libpng \
+    libjpeg-turbo \
+    libwebp \
     postgresql-client \
     libpq \
     procps \
@@ -47,15 +49,18 @@ RUN apk add --no-cache --virtual .build-deps \
     $PHPIZE_DEPS \
     libzip-dev \
     libpng-dev \
+    libjpeg-turbo-dev \
+    libwebp-dev \
     postgresql-dev \
     oniguruma-dev \
     icu-dev \
     && docker-php-ext-configure pgsql \
-    && docker-php-ext-configure gd \
+    && docker-php-ext-configure gd --with-jpeg --with-webp \
     && docker-php-ext-install -j$(nproc) \
     pdo \
     zip \
     gd \
+    exif \
     pgsql \
     pdo_pgsql \
     bcmath \
