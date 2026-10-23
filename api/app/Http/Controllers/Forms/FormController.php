@@ -21,6 +21,7 @@ use App\Service\Forms\FormListStatsLoader;
 use App\Service\Forms\FormStructureValidator;
 use App\Service\Forms\FormUpdateService;
 use App\Service\Storage\FileUploadPathService;
+use App\Service\Storage\ImageOptimizer;
 use App\Service\Storage\StorageFileNameParser;
 use App\Service\Storage\UploadSecurityService;
 use Illuminate\Http\Request;
@@ -297,17 +298,26 @@ class FormController extends Controller
             ]);
         }
 
-        $newPath = self::ASSETS_UPLOAD_PATH . '/' . $fileNameParser->getMovedFileName();
-        if ($inspection->isSvg) {
-            Storage::put($newPath, $inspection->sanitizedContents);
+        $movedFileName = $fileNameParser->getMovedFileName();
+
+        // Images are resized and converted to WebP to save storage space
+        $optimized = !$inspection->isSvg && ImageOptimizer::isOptimizable($movedFileName)
+            ? ImageOptimizer::optimize(Storage::get($fileName), $movedFileName, (int) config('opnform.image_optimization.assets_max_width', 1920))
+            : null;
+        if ($optimized !== null) {
+            $movedFileName = ImageOptimizer::webpName($movedFileName);
+            Storage::put(self::ASSETS_UPLOAD_PATH . '/' . $movedFileName, $optimized);
+            Storage::delete($fileName);
+        } elseif ($inspection->isSvg) {
+            Storage::put(self::ASSETS_UPLOAD_PATH . '/' . $movedFileName, $inspection->sanitizedContents);
             Storage::delete($fileName);
         } else {
-            Storage::move($fileName, $newPath);
+            Storage::move($fileName, self::ASSETS_UPLOAD_PATH . '/' . $movedFileName);
         }
 
         return $this->success([
             'message' => 'File uploaded.',
-            'url' => route('forms.assets.show', [$fileNameParser->getMovedFileName()]),
+            'url' => route('forms.assets.show', [$movedFileName]),
         ]);
     }
 

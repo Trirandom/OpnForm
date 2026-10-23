@@ -6,6 +6,7 @@ use App\Events\Forms\FormSubmitted;
 use App\Http\Controllers\Forms\FormController;
 use App\Http\Requests\AnswerFormRequest;
 use App\Service\Storage\FileUploadPathService;
+use App\Service\Storage\ImageOptimizer;
 use App\Models\Forms\Form;
 use App\Models\Forms\FormSubmission;
 use App\Service\Billing\Feature;
@@ -445,6 +446,18 @@ class StoreFormSubmissionJob implements ShouldQueue
         if (empty($movedFileName)) {
             return null; // Canonical name generation failed
         }
+
+        // Images are resized and converted to WebP to save storage space
+        if (ImageOptimizer::isOptimizable($movedFileName)) {
+            $optimized = ImageOptimizer::optimize(Storage::get($fileNameInTmp), $movedFileName);
+            if ($optimized !== null) {
+                $movedFileName = ImageOptimizer::webpName($movedFileName);
+                Storage::put(FileUploadPathService::getFileUploadPath($this->form->id, $movedFileName), $optimized);
+                Storage::delete($fileNameInTmp);
+                return $movedFileName;
+            }
+        }
+
         $completeNewFilename = FileUploadPathService::getFileUploadPath($this->form->id, $movedFileName);
         Storage::move($fileNameInTmp, $completeNewFilename);
         return $movedFileName;
