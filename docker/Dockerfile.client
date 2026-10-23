@@ -44,4 +44,7 @@ WORKDIR /app
 COPY --from=javascript-builder /app/.output/ /app/
 RUN ls /app/
 
+# Run the Nuxt server as the image's built-in unprivileged user (uid 1000) instead of root
+USER node
+
 CMD [ "node", "./server/index.mjs" ]
