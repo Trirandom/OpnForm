@@ -54,6 +54,8 @@ apply_php_configuration() {
     
     # Create custom PHP config file
     PHP_CUSTOM_CONFIG_FILE="/usr/local/etc/php/conf.d/99-custom.ini"
+    # Start from an empty file so restarts don't keep appending duplicate settings
+    : > $PHP_CUSTOM_CONFIG_FILE
     
     # Apply memory limit if provided, otherwise default to 1G
     if [ -n "$PHP_MEMORY_LIMIT" ]; then
@@ -89,7 +91,8 @@ apply_php_configuration() {
 }
 
 prep_file_permissions() {
-    chmod a+x ./artisan
+    # Already done at build time; only needed when the source is bind-mounted (dev)
+    [ -x ./artisan ] || chmod a+x ./artisan
 }
 
 prep_storage() {
@@ -102,12 +105,12 @@ prep_storage() {
     mkdir -p "$app_storage_path/framework/views"
     mkdir -p "$app_storage_path/logs"
 
-    # Set permissions for the entire storage directory
-    chown -R www-data:www-data "$app_storage_path"
-    chmod -R 775 "$app_storage_path"
-
-    touch /var/log/opnform.log
-    chown www-data /var/log/opnform.log
+    # Set permissions for the entire storage directory. The image runs as www-data, so the chown
+    # only happens if the container is started as root (e.g. an old compose override).
+    if [ "$(id -u)" = "0" ]; then
+        chown -R www-data:www-data "$app_storage_path"
+    fi
+    chmod -R 775 "$app_storage_path" 2>/dev/null || echo "Warning: could not chmod some files in $app_storage_path"
 
     # Run Laravel's storage link command (ensure script is run from app root or adjust path to artisan)
     echo "Creating public storage symlink"
