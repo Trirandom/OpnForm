@@ -28,6 +28,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('forms:retry-pending-submission-file-deletions')->everyFifteenMinutes()->withoutOverlapping();
         $schedule->command('forms:integration-events-cleanup')->daily();
         $schedule->command('agent-drafts:purge-expired')->hourly()->withoutOverlapping();
+        $schedule->command('forms:storage-cleanup')->dailyAt('03:30')->withoutOverlapping();
         if (config('app.self_hosted')) {
             $schedule->command('app:scheduler-status --mode=record')->everyMinute();
             $schedule->command('telemetry:ping')->hourly();
