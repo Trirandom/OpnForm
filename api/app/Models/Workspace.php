@@ -20,9 +20,9 @@ class Workspace extends Model implements CachableAttributes
     use CachesAttributes;
     use HasFactory;
 
-    public const MAX_FILE_SIZE_FREE = 5000000; // 5 MB
+    public const MAX_FILE_SIZE_FREE = 200000000; // 200 MB
 
-    public const MAX_FILE_SIZE_PRO = 50000000; // 50 MB
+    public const MAX_FILE_SIZE_PRO = 200000000; // 200 MB
 
     public const MAX_DOMAIN_PRO = 1;
 

@@ -44,11 +44,7 @@ class License extends Model
 
     public function getMaxFileSizeAttribute(): int
     {
-        return [
-            1 => 25000000, // 25 MB,
-            2 => 50000000, // 50 MB,
-            3 => 75000000, // 75 MB,
-        ][$this->meta['tier']];
+        return 200000000;
     }
 
     public function getCustomDomainLimitCountAttribute(): ?int

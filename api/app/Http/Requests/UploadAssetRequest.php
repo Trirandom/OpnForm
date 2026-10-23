@@ -6,7 +6,7 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class UploadAssetRequest extends FormRequest
 {
-    public const FORM_ASSET_MAX_SIZE = 5000000;
+    public const FORM_ASSET_MAX_SIZE = 300000000; // 300 MB
 
     /**
      * Get the validation rules that apply to the request.
