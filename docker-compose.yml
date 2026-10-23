@@ -1,37 +1,55 @@
 ---
+# Shared by api / api-worker / api-scheduler. Only `api` has `build:`, so `docker compose build`
+# builds the image once and the other two reuse it.
+x-api: &api-environment
+  # image: jhumanj/opnform-api:latest
+  # Override API_IMAGE in .env to match the tag your cluster expects, so a `docker compose build`
+  # output can be imported as-is.
+  image: ${API_IMAGE:-opnform-api:latest}
+  restart: unless-stopped
+  # Image runs as www-data (uid 82); no capabilities or privilege escalation needed.
+  user: "82:82"
+  security_opt: &no-new-privileges
+    - no-new-privileges:true
+  cap_drop: &cap-drop-all
+    - ALL
+  volumes: &api-environment-volumes
+    - opnform_storage:/usr/share/nginx/html/storage:rw
+  environment: &api-env
+    APP_ENV: production
+    # Database settings
+    DB_HOST: db
+    REDIS_HOST: redis
+    DB_DATABASE: ${DB_DATABASE:-forge}
+    DB_USERNAME: ${DB_USERNAME:-forge}
+    DB_PASSWORD: ${DB_PASSWORD:-forge}
+    DB_CONNECTION: ${DB_CONNECTION:-pgsql}
+    # PHP Configuration
+    PHP_MEMORY_LIMIT: "1G"
+    PHP_MAX_EXECUTION_TIME: "600"
+    PHP_UPLOAD_MAX_FILESIZE: "200M"
+    PHP_POST_MAX_SIZE: "200M"
+  env_file:
+    - ./api/.env
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy # Depend on redis being healthy too
+  healthcheck:
+    test: ["CMD-SHELL", "php /usr/share/nginx/html/artisan about || exit 1"]
+    interval: 30s
+    timeout: 15s
+    retries: 3
+    start_period: 60s
+  networks:
+    - default
+
 services:
-  api: &api-environment
-    image: jhumanj/opnform-api:latest
+  api:
+    <<: *api-environment
+    build: ./api
     container_name: opnform-api
-    volumes: &api-environment-volumes
-      - opnform_storage:/usr/share/nginx/html/storage:rw
-    environment: &api-env
-      APP_ENV: production
-      # Database settings
-      DB_HOST: db
-      REDIS_HOST: redis
-      DB_DATABASE: ${DB_DATABASE:-forge}
-      DB_USERNAME: ${DB_USERNAME:-forge}
-      DB_PASSWORD: ${DB_PASSWORD:-forge}
-      DB_CONNECTION: ${DB_CONNECTION:-pgsql}
-      # PHP Configuration
-      PHP_MEMORY_LIMIT: "1G"
-      PHP_MAX_EXECUTION_TIME: "600"
-      PHP_UPLOAD_MAX_FILESIZE: "64M"
-      PHP_POST_MAX_SIZE: "64M"
-    env_file:
-      - ./api/.env
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy # Depend on redis being healthy too
-    healthcheck:
-      test: ["CMD-SHELL", "php /usr/share/nginx/html/artisan about || exit 1"]
-      interval: 30s
-      timeout: 15s
-      retries: 3
-      start_period: 60s
 
   api-worker:
     <<: *api-environment
@@ -47,6 +65,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    networks:
+      - default
 
   api-scheduler:
     <<: *api-environment
@@ -65,12 +85,24 @@ services:
       timeout: 30s
       retries: 3
       start_period: 70s # Allow time for first scheduled run and cache write
+    networks:
+      - default
 
   ui:
-    image: jhumanj/opnform-client:latest
+    # image: jhumanj/opnform-client:latest
+    image: ${UI_IMAGE:-opnform-client:latest}
+    build: ./client
     container_name: opnform-client
+    user: "1000:1000"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: *no-new-privileges
+    cap_drop: *cap-drop-all
+    restart: unless-stopped
     env_file:
       - ./client/.env
+    labels:
+      - traefik.enable=false
     depends_on:
       api:
         condition: service_healthy
@@ -81,20 +113,35 @@ services:
       timeout: 10s
       retries: 3
       start_period: 45s
+    networks:
+      - default
 
   redis:
     image: redis:7
     container_name: opnform-redis
+    user: "999:999"
+    read_only: true
+    security_opt: *no-new-privileges
+    cap_drop: *cap-drop-all
+    restart: unless-stopped
     volumes:
       - redis-data:/data
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
       interval: 30s
       timeout: 5s
+    networks:
+      - default
 
   db:
     image: postgres:16
     container_name: opnform-db
+    user: "999:999"
+    read_only: true
+    tmpfs: ["/var/run/postgresql:uid=999,gid=999", /tmp]
+    security_opt: *no-new-privileges
+    cap_drop: *cap-drop-all
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_DATABASE:-forge}
       POSTGRES_USER: ${DB_USERNAME:-forge}
@@ -105,29 +152,55 @@ services:
       timeout: 5s
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    networks:
+      - default
 
   ingress:
-    image: nginx:1
+    # Unprivileged variant listens on 8080 (see docker/nginx.conf) since it can't bind :80
+    image: nginxinc/nginx-unprivileged:1
     container_name: opnform-ingress
+    user: "101:101"
+    read_only: true
+    tmpfs: ["/etc/nginx/conf.d:uid=101,gid=101", /tmp]
+    security_opt: *no-new-privileges
+    cap_drop: *cap-drop-all
+    restart: unless-stopped
     volumes:
       - ./docker/nginx.conf:/etc/nginx/templates/default.conf.template
-    ports:
-      - 80:80
+    # ports:
+    #   - 8001:8080
     environment:
-      - NGINX_MAX_BODY_SIZE=64m
+      - NGINX_MAX_BODY_SIZE=300m
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.opnform.rule=Host(`${OPNFORM_HOST:-localhost}`)
+      - traefik.http.routers.opnform.entrypoints=websecure
+      - traefik.http.routers.opnform.tls=true
+      - traefik.http.routers.opnform.tls.certresolver=le
+      - traefik.http.services.opnform.loadbalancer.server.port=8080
+      - traefik.http.services.opnform.loadbalancer.healthcheck.path=/
+      - traefik.http.services.opnform.loadbalancer.healthcheck.interval=30s
     depends_on:
       api:
         condition: service_started
       ui:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "nginx -t && curl -f http://localhost/ || exit 1"]
+      test: ["CMD-SHELL", "nginx -t && curl -f http://localhost:8080/ || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+    networks:
+      - default
+      - web
 
 volumes:
   postgres-data:
   opnform_storage:
   redis-data:
+
+networks:
+  default:
+  web:
+    external: true
