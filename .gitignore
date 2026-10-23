@@ -10,6 +10,7 @@ docker-compose.override.yml
 /.make.*
 /.e2e/
 /.playwright/
+data/*
 
 # Environment files
 .env
